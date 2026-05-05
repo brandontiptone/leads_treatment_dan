@@ -327,6 +327,45 @@ except Exception as e:
 st.divider()
 
 # ─────────────────────────────────────────────
+# VISUALISATION ZONES PARTAGÉES
+# ─────────────────────────────────────────────
+
+if clients:
+    zones_partagees = detecter_zones_partagees(clients)
+    if zones_partagees:
+        with st.expander("🔍 Voir les zones partagées entre clients", expanded=False):
+            st.markdown("Les départements suivants sont partagés entre plusieurs clients et feront l'objet d'une **répartition équitable** des leads :")
+            st.divider()
+
+            # Tableau zones partagées
+            rows = []
+            for prefix, noms in sorted(zones_partagees.items(), key=lambda x: x[0]):
+                rows.append({
+                    "Département": f"**{prefix}**",
+                    "Nb clients": len(noms),
+                    "Clients concernés": " / ".join(noms)
+                })
+            st.table(rows)
+
+            st.divider()
+
+            # Vue par client — quels clients partagent des zones avec lui
+            st.markdown("**Vue par client :**")
+            for client in clients:
+                zones_client = [p for p in client["prefixes"] if p in zones_partagees]
+                if zones_client:
+                    with st.container():
+                        st.markdown(f"🔵 **{client['nom']}** partage {len(zones_client)} zone(s) :")
+                        for z in zones_client:
+                            autres = [n for n in zones_partagees[z] if n != client["nom"]]
+                            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;• Département **{z}** → partagé avec : {', '.join(autres)}")
+    else:
+        with st.expander("🔍 Zones partagées", expanded=False):
+            st.success("✅ Aucune zone partagée — chaque département est exclusif à un seul client.")
+
+st.divider()
+
+# ─────────────────────────────────────────────
 # ÉTAPE 2 — Upload des fichiers
 # ─────────────────────────────────────────────
 
