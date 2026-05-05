@@ -333,32 +333,53 @@ st.divider()
 if clients:
     zones_partagees = detecter_zones_partagees(clients)
     if zones_partagees:
-        with st.expander("🔍 Voir les zones partagées entre clients", expanded=False):
-            st.markdown("Les départements suivants sont partagés entre plusieurs clients et feront l'objet d'une **répartition équitable** des leads :")
+        with st.expander("🔍 Matrice des zones partagées entre clients", expanded=False):
+            st.markdown("**✅ = départements en commun** entre deux clients — les leads seront répartis équitablement.")
             st.divider()
 
-            # Tableau zones partagées
+            noms_clients = [c["nom"] for c in clients]
+
+            # Construction de la matrice : pour chaque paire de clients, quels deps en commun
+            matrice = {}
+            for c1 in noms_clients:
+                matrice[c1] = {}
+                prefixes_c1 = set(next(c["prefixes"] for c in clients if c["nom"] == c1))
+                for c2 in noms_clients:
+                    if c1 == c2:
+                        matrice[c1][c2] = "—"
+                    else:
+                        prefixes_c2 = set(next(c["prefixes"] for c in clients if c["nom"] == c2))
+                        communs = sorted(prefixes_c1 & prefixes_c2)
+                        matrice[c1][c2] = ", ".join(communs) if communs else ""
+
+            df_matrice = pd.DataFrame(matrice).T
+            df_matrice = df_matrice[noms_clients]
+
+            # Style : colorer les cellules non vides
+            def colorier(val):
+                if val == "—":
+                    return "background-color: #313244; color: #6c7086;"
+                elif val == "":
+                    return "background-color: #1e1e2e; color: #1e1e2e;"
+                else:
+                    return "background-color: #f38ba8; color: #1e1e2e; font-weight: bold;"
+
+            st.dataframe(
+                df_matrice.style.applymap(colorier),
+                use_container_width=True
+            )
+
+            st.divider()
+            st.markdown("**Récapitulatif des départements partagés :**")
             rows = []
-            for prefix, noms in sorted(zones_partagees.items(), key=lambda x: x[0]):
+            for prefix, noms in sorted(zones_partagees.items()):
                 rows.append({
-                    "Département": f"**{prefix}**",
-                    "Nb clients": len(noms),
-                    "Clients concernés": " / ".join(noms)
+                    "Département": prefix,
+                    "Clients concernés": " / ".join(noms),
+                    "Nb clients": len(noms)
                 })
-            st.table(rows)
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-            st.divider()
-
-            # Vue par client — quels clients partagent des zones avec lui
-            st.markdown("**Vue par client :**")
-            for client in clients:
-                zones_client = [p for p in client["prefixes"] if p in zones_partagees]
-                if zones_client:
-                    with st.container():
-                        st.markdown(f"🔵 **{client['nom']}** partage {len(zones_client)} zone(s) :")
-                        for z in zones_client:
-                            autres = [n for n in zones_partagees[z] if n != client["nom"]]
-                            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;• Département **{z}** → partagé avec : {', '.join(autres)}")
     else:
         with st.expander("🔍 Zones partagées", expanded=False):
             st.success("✅ Aucune zone partagée — chaque département est exclusif à un seul client.")
