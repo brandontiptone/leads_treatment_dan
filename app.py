@@ -364,10 +364,12 @@ if clients:
                 else:
                     return "background-color: #f38ba8; color: #1e1e2e; font-weight: bold;"
 
-            st.dataframe(
-                df_matrice.style.applymap(colorier),
-                use_container_width=True
-            )
+            try:
+                styled = df_matrice.style.map(colorier)
+            except AttributeError:
+                styled = df_matrice.style.applymap(colorier)
+
+            st.dataframe(styled, use_container_width=True)
 
             st.divider()
             st.markdown("**Récapitulatif des départements partagés :**")
