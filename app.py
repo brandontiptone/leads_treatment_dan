@@ -1,12 +1,55 @@
 """
-Fonctions métier de traitement des leads Meta.
-Utilisé par app.py (Streamlit) et traitement_leads_meta.py (tkinter).
+Interface web Streamlit — Traitement Leads Meta
+Déployable gratuitement sur https://streamlit.io/cloud
 """
 
-import io
 import json
+import zipfile
+import io
 import pandas as pd
+import streamlit as st
 from datetime import datetime
+
+# ─────────────────────────────────────────────
+# CONFIG PAGE
+# ─────────────────────────────────────────────
+
+st.set_page_config(
+    page_title="Traitement Leads Meta",
+    page_icon="📊",
+    layout="centered"
+)
+
+st.markdown("""
+<style>
+    .main { background-color: #1e1e2e; }
+    .stApp { background-color: #1e1e2e; color: #cdd6f4; }
+    h1, h2, h3 { color: #89b4fa; }
+    .stButton > button {
+        background-color: #89b4fa;
+        color: #1e1e2e;
+        font-weight: bold;
+        border-radius: 8px;
+        border: none;
+        padding: 0.5rem 2rem;
+    }
+    .stButton > button:hover { background-color: #74c7ec; }
+    .stDownloadButton > button {
+        background-color: #a6e3a1;
+        color: #1e1e2e;
+        font-weight: bold;
+        border-radius: 8px;
+        border: none;
+    }
+    .stTextArea textarea { background-color: #181825; color: #cdd6f4; }
+    .stFileUploader { background-color: #181825; }
+    div[data-testid="stMetricValue"] { color: #a6e3a1; font-size: 2rem; }
+</style>
+""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# MAPPING COLONNES
+# ─────────────────────────────────────────────
 
 MAPPING_COLONNES = {
     "Date de création": [
@@ -32,9 +75,11 @@ MAPPING_COLONNES = {
 
 COLONNES_SORTIE = ["Date de création", "Nom Prénom", "Email", "Téléphone", "Code Postal"]
 
+# ─────────────────────────────────────────────
+# FONCTIONS METIER
+# ─────────────────────────────────────────────
 
 def lire_csv_depuis_bytes(file_bytes):
-    """Lit un CSV depuis des bytes (upload Streamlit) avec détection auto encodage/séparateur."""
     for encoding in ["utf-16", "utf-16-le", "utf-16-be", "utf-8", "utf-8-sig", "latin-1", "cp1252"]:
         for sep in [",", ";", "\t"]:
             try:
@@ -79,100 +124,7 @@ def normaliser_lead(row, mapping):
     return {champ: get(champ) for champ in COLONNES_SORTIE}
 
 
-def detecter_zones_partagees(clients):
-    """Retourne un dict {prefix: [liste clients]} pour les zones partagées entre plusieurs clients."""
-    prefix_clients = {}
-    for client in clients:
-        for prefix in client["prefixes"]:
-            prefix_clients.setdefault(prefix, []).append(client["nom"])
-    return {p: noms for p, noms in prefix_clients.items() if len(noms) > 1}
-
-
-def classifier_leads_avec_repartition(leads_bruts, clients):
-    """
-    Classifie les leads en gérant la répartition équitable sur les zones partagées.
-    - Zones exclusives : lead attribué au seul client concerné
-    - Zones partagées : leads répartis en alternance entre les clients concernés
-    """
-    zones_partagees = detecter_zones_partagees(clients)
-    
-    # Compteurs pour la répartition équitable par zone partagée
-    compteurs_zones = {prefix: 0 for prefix in zones_partagees}
-
-    resultats = {c["nom"]: [] for c in clients}
-    resultats["Hors_Zone"] = []
-
-    for lead in leads_bruts:
-        cp = str(lead.get("Code Postal", "")).strip()
-        if cp.startswith("z:"):
-            cp = cp[2:].strip()
-
-        prefix_match = None
-        for client in clients:
-            for prefix in client["prefixes"]:
-                if cp.startswith(str(prefix)):
-                    prefix_match = prefix
-                    break
-            if prefix_match:
-                break
-
-        if prefix_match is None:
-            resultats["Hors_Zone"].append(lead)
-            continue
-
-        if prefix_match in zones_partagees:
-            # Zone partagée → répartition en tourniquet
-            clients_concernes = zones_partagees[prefix_match]
-            idx = compteurs_zones[prefix_match] % len(clients_concernes)
-            client_choisi = clients_concernes[idx]
-            compteurs_zones[prefix_match] += 1
-            resultats[client_choisi].append(lead)
-        else:
-            # Zone exclusive → client unique
-            for client in clients:
-                for prefix in client["prefixes"]:
-                    if cp.startswith(str(prefix)):
-                        resultats[client["nom"]].append(lead)
-                        break
-                else:
-                    continue
-                break
-
-    return resultats
-
-
-def dedoublonner(leads):
-    vus_email, vus_tel = {}, {}
-    doublons, propres = [], {cle: [] for cle in leads}
-
-    for cle, data in leads.items():
-        for lead in data:
-            email = lead.get("Email", "").lower().strip()
-            tel   = lead.get("Téléphone", "").strip()
-            doublon, raison = False, ""
-
-            if email and email in vus_email:
-                doublon = True
-                raison  = f"Email en double : {email} (déjà vu dans {vus_email[email]})"
-            elif tel and tel in vus_tel:
-                doublon = True
-                raison  = f"Téléphone en double : {tel} (déjà vu dans {vus_tel[tel]})"
-
-            if doublon:
-                lead_d = dict(lead)
-                lead_d["Raison"] = raison
-                lead_d["Client origine"] = cle
-                doublons.append(lead_d)
-            else:
-                propres[cle].append(lead)
-                if email: vus_email[email] = cle
-                if tel:   vus_tel[tel] = cle
-
-    return propres, doublons
-
-
 def valider_config(config_json_str):
-    """Valide et retourne la liste des clients depuis un JSON string."""
     config = json.loads(config_json_str)
     clients = config.get("clients", [])
     if not clients:
@@ -183,67 +135,131 @@ def valider_config(config_json_str):
     return clients
 
 
-def traiter_fichiers(fichiers_bytes, clients, log_callback=None):
+def detecter_zones_partagees(clients):
+    """Retourne {prefix: [liste clients]} pour les zones partagées."""
+    prefix_clients = {}
+    for client in clients:
+        for prefix in client["prefixes"]:
+            prefix_clients.setdefault(prefix, []).append(client["nom"])
+    return {p: noms for p, noms in prefix_clients.items() if len(noms) > 1}
+
+
+def dedoublonner(leads_bruts):
+    """Supprime les doublons sur email ou téléphone."""
+    vus_email, vus_tel = {}, {}
+    propres, doublons = [], []
+    for lead in leads_bruts:
+        email = lead.get("Email", "").lower().strip()
+        tel   = lead.get("Téléphone", "").strip()
+        doublon, raison = False, ""
+        if email and email in vus_email:
+            doublon = True
+            raison  = f"Email en double : {email}"
+        elif tel and tel in vus_tel:
+            doublon = True
+            raison  = f"Téléphone en double : {tel}"
+        if doublon:
+            lead_d = dict(lead)
+            lead_d["Raison"] = raison
+            doublons.append(lead_d)
+        else:
+            propres.append(lead)
+            if email: vus_email[email] = True
+            if tel:   vus_tel[tel] = True
+    return propres, doublons
+
+
+def classifier_leads(leads_propres, clients):
     """
-    Traite une liste de fichiers (bytes) et retourne les DataFrames résultants.
-    fichiers_bytes : list of (nom, bytes)
-    Retourne : dict {nom_client: DataFrame}, doublons_df, global_df, logs[]
+    Classifie les leads avec répartition équitable sur les zones partagées.
+    - Zone exclusive  → lead attribué au seul client concerné
+    - Zone partagée   → leads répartis en tourniquet entre les clients concernés
     """
-    tous_leads_bruts = []
+    zones_partagees = detecter_zones_partagees(clients)
+    compteurs = {prefix: 0 for prefix in zones_partagees}
+
+    resultats = {c["nom"]: [] for c in clients}
+    resultats["Hors_Zone"] = []
+
+    for lead in leads_propres:
+        cp = str(lead.get("Code Postal", "")).strip()
+        if cp.startswith("z:"):
+            cp = cp[2:].strip()
+
+        prefix_match = None
+        clients_match = []
+        for client in clients:
+            for prefix in client["prefixes"]:
+                if cp.startswith(str(prefix)):
+                    prefix_match = prefix
+                    clients_match = [client["nom"]]
+                    break
+            if prefix_match:
+                break
+
+        if prefix_match is None:
+            resultats["Hors_Zone"].append(lead)
+            continue
+
+        if prefix_match in zones_partagees:
+            # Zone partagée → tourniquet
+            clients_concernes = zones_partagees[prefix_match]
+            idx = compteurs[prefix_match] % len(clients_concernes)
+            client_choisi = clients_concernes[idx]
+            compteurs[prefix_match] += 1
+            resultats[client_choisi].append(lead)
+        else:
+            resultats[clients_match[0]].append(lead)
+
+    return resultats
+
+
+def df_to_csv_bytes(df):
+    return df.to_csv(index=False, encoding="utf-8-sig", sep=";").encode("utf-8-sig")
+
+
+def traiter_fichiers(fichiers_bytes, clients):
     logs = []
+    tous_leads_bruts = []
 
     def log(msg, level="INFO"):
         logs.append((level, msg))
-        if log_callback:
-            log_callback(level, msg)
 
-    # Détecter et logger les zones partagées
+    # Détecter zones partagées
     zones_partagees = detecter_zones_partagees(clients)
     if zones_partagees:
         for prefix, noms in zones_partagees.items():
-            log(f"  Zone partagée détectée : {prefix} → {', '.join(noms)} (répartition équitable)", "WARNING")
+            log(f"Zone partagée : {prefix} → {', '.join(noms)} (répartition équitable)", "WARNING")
 
+    # Lecture des fichiers
     for nom_fichier, file_bytes in fichiers_bytes:
         log(f"Lecture : {nom_fichier}")
         try:
             df, encoding, sep = lire_csv_depuis_bytes(file_bytes)
             log(f"  Encodage : {encoding} | Séparateur : '{sep}'", "DEBUG")
             mapping = construire_mapping(df.columns.tolist())
-
             champs_manquants = [c for c in MAPPING_COLONNES if c not in mapping]
             if champs_manquants:
                 log(f"  Colonnes non détectées : {champs_manquants}", "WARNING")
-
             for _, row in df.iterrows():
-                lead = normaliser_lead(row, mapping)
-                tous_leads_bruts.append(lead)
-
-            log(f"  ✓ {len(df)} leads traités")
+                tous_leads_bruts.append(normaliser_lead(row, mapping))
+            log(f"  ✓ {len(df)} leads lus")
         except Exception as e:
             log(f"  ✗ Erreur : {e}", "ERROR")
 
-    # Dédoublonnage sur tous les leads bruts avant classification
-    leads_dict_brut = {"_tous": tous_leads_bruts}
-    leads_dict_brut, doublons = dedoublonner(leads_dict_brut)
-    leads_propres = leads_dict_brut["_tous"]
+    # Dédoublonnage
+    leads_propres, doublons = dedoublonner(tous_leads_bruts)
     log(f"Dédoublonnage : {len(doublons)} doublon(s) détecté(s)", "WARNING" if doublons else "INFO")
 
-    # Classification avec répartition équitable sur zones partagées
-    leads = classifier_leads_avec_repartition(leads_propres, clients)
-
-    # Logger la répartition finale
+    # Classification
+    leads = classifier_leads(leads_propres, clients)
     for cle, data in leads.items():
-        if len(data) > 0:
+        if data:
             log(f"  → {cle} : {len(data)} leads", "DEBUG")
 
-    # Dédoublonnage déjà fait — on réinitialise pour compatibilité
-    doublons_list = doublons
-    # Construction des DataFrames
-    resultats = {}
-    for cle, data in leads.items():
-        resultats[cle] = pd.DataFrame(data, columns=COLONNES_SORTIE)
-
-    doublons_df = pd.DataFrame(doublons_list, columns=COLONNES_SORTIE + ["Client origine", "Raison"]) if doublons_list else pd.DataFrame()
+    # Construction DataFrames
+    resultats = {cle: pd.DataFrame(data, columns=COLONNES_SORTIE) for cle, data in leads.items()}
+    doublons_df = pd.DataFrame(doublons, columns=COLONNES_SORTIE + ["Raison"]) if doublons else pd.DataFrame()
 
     # Global
     tous = []
@@ -256,7 +272,183 @@ def traiter_fichiers(fichiers_bytes, clients, log_callback=None):
 
     return resultats, doublons_df, global_df, logs
 
+# ─────────────────────────────────────────────
+# SESSION STATE
+# ─────────────────────────────────────────────
 
-def df_to_csv_bytes(df):
-    """Convertit un DataFrame en bytes CSV téléchargeable."""
-    return df.to_csv(index=False, encoding="utf-8-sig", sep=";").encode("utf-8-sig")
+for key in ["resultats", "doublons_df", "global_df", "logs", "timestamp"]:
+    if key not in st.session_state:
+        st.session_state[key] = None
+
+# ─────────────────────────────────────────────
+# TITRE
+# ─────────────────────────────────────────────
+
+st.title("📊 Traitement Leads Meta")
+st.markdown("**Facebook Ads — Classement automatique par code postal**")
+st.divider()
+
+# ─────────────────────────────────────────────
+# ÉTAPE 1 — Configuration clients
+# ─────────────────────────────────────────────
+
+st.header("① Configuration des clients")
+
+config_defaut = json.dumps({
+  "clients": [
+    {"nom": "Client_HA2",       "prefixes": ["71","58","89","21","39","70","25","90"]},
+    {"nom": "Client_RR",        "prefixes": ["28","61","53","35","44","49","72","37","86","79","85","36","18","41","45"]},
+    {"nom": "Client_AI",        "prefixes": ["22","35","56","72","53"]},
+    {"nom": "Client_AV3",       "prefixes": ["28","45","27","76","58","89","60","80","02","57","54","88","53","72"]},
+    {"nom": "Client_ZZ7",       "prefixes": ["26","07","38","84","13"]},
+    {"nom": "Client_ZZ8",       "prefixes": ["15","63","43","03"]},
+    {"nom": "Client_SH",        "prefixes": ["54","55","57","88","51","52","10"]},
+    {"nom": "Client_AV1",       "prefixes": ["67","68","88"]},
+    {"nom": "Client_AV2",       "prefixes": ["57","54","70","88","90","67","68"]},
+    {"nom": "Client_RN_GLOBAL", "prefixes": ["24","47","66","11","09","64","65","87","23","19"]},
+    {"nom": "Client_RN2",       "prefixes": ["66","11","09"]}
+  ]
+}, indent=2, ensure_ascii=False)
+
+config_json = st.text_area(
+    "Colle ou modifie ta configuration JSON :",
+    value=config_defaut,
+    height=200,
+    help="Ajoute ou retire des clients sans toucher au reste."
+)
+
+clients = None
+try:
+    clients = valider_config(config_json)
+    st.success(f"✅ {len(clients)} client(s) configuré(s) : {', '.join(c['nom'] for c in clients)}")
+except Exception as e:
+    st.error(f"❌ Erreur de configuration : {e}")
+
+st.divider()
+
+# ─────────────────────────────────────────────
+# ÉTAPE 2 — Upload des fichiers
+# ─────────────────────────────────────────────
+
+st.header("② Charger les fichiers CSV Meta")
+
+fichiers_uploades = st.file_uploader(
+    "Glisse tes fichiers CSV ici (plusieurs fichiers acceptés)",
+    type=["csv"],
+    accept_multiple_files=True
+)
+
+if fichiers_uploades:
+    st.info(f"📁 {len(fichiers_uploades)} fichier(s) chargé(s) : {', '.join(f.name for f in fichiers_uploades)}")
+
+st.divider()
+
+# ─────────────────────────────────────────────
+# ÉTAPE 3 — Lancement
+# ─────────────────────────────────────────────
+
+st.header("③ Lancer le traitement")
+
+if st.button("▶  Lancer le traitement", disabled=(not fichiers_uploades or clients is None)):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fichiers_bytes = [(f.name, f.read()) for f in fichiers_uploades]
+
+    log_container = st.expander("📋 Journal d'exécution", expanded=True)
+    progress = st.progress(0, text="Démarrage...")
+
+    with st.spinner("Traitement en cours..."):
+        progress.progress(10, "Lecture des fichiers...")
+        resultats, doublons_df, global_df, logs = traiter_fichiers(fichiers_bytes, clients)
+        progress.progress(90, "Génération des fichiers de sortie...")
+
+        st.session_state.resultats  = resultats
+        st.session_state.doublons_df = doublons_df
+        st.session_state.global_df  = global_df
+        st.session_state.logs       = logs
+        st.session_state.timestamp  = timestamp
+
+    progress.progress(100, "✅ Terminé !")
+
+    with log_container:
+        for level, msg in logs:
+            if level == "ERROR":    st.error(msg)
+            elif level == "WARNING": st.warning(msg)
+            elif level == "DEBUG":  st.caption(msg)
+            else:                   st.success(msg)
+
+# ─────────────────────────────────────────────
+# RÉSULTATS (après traitement ou refresh)
+# ─────────────────────────────────────────────
+
+if st.session_state.resultats is not None:
+    resultats   = st.session_state.resultats
+    doublons_df = st.session_state.doublons_df
+    global_df   = st.session_state.global_df
+    timestamp   = st.session_state.timestamp
+
+    st.divider()
+    st.header("④ Récapitulatif")
+
+    total_leads = sum(len(df) for df in resultats.values())
+    nb_doublons = len(doublons_df) if not doublons_df.empty else 0
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total leads valides", total_leads)
+    col2.metric("Doublons détectés", nb_doublons)
+    col3.metric("Fichiers générés", len(resultats))
+
+    recap_data = []
+    for cle, df in resultats.items():
+        recap_data.append({"Client": cle, "Leads": len(df), "Statut": "✅ OK" if len(df) > 0 else "— Vide"})
+    if nb_doublons > 0:
+        recap_data.append({"Client": "⚠ Doublons", "Leads": nb_doublons, "Statut": "fichier séparé"})
+    recap_data.append({"Client": "🌐 Global", "Leads": total_leads, "Statut": "tous les leads valides"})
+    st.table(recap_data)
+
+    st.divider()
+    st.header("⑤ Télécharger les fichiers")
+
+    cols = st.columns(2)
+    for i, (cle, df) in enumerate(resultats.items()):
+        with cols[i % 2]:
+            st.download_button(
+                label=f"⬇ {cle} ({len(df)} leads)",
+                data=df_to_csv_bytes(df),
+                file_name=f"{cle}_{timestamp}.csv",
+                mime="text/csv",
+                key=f"dl_{cle}"
+            )
+
+    if not doublons_df.empty:
+        st.download_button(
+            label=f"⬇ Doublons ({len(doublons_df)} leads)",
+            data=df_to_csv_bytes(doublons_df),
+            file_name=f"leads_doublons_{timestamp}.csv",
+            mime="text/csv",
+            key="dl_doublons"
+        )
+
+    st.download_button(
+        label=f"⬇ Fichier Global ({len(global_df)} leads)",
+        data=df_to_csv_bytes(global_df),
+        file_name=f"leads_global_{timestamp}.csv",
+        mime="text/csv",
+        key="dl_global"
+    )
+
+    st.divider()
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for cle, df in resultats.items():
+            zf.writestr(f"{cle}_{timestamp}.csv", df_to_csv_bytes(df).decode("utf-8-sig"))
+        if not doublons_df.empty:
+            zf.writestr(f"leads_doublons_{timestamp}.csv", df_to_csv_bytes(doublons_df).decode("utf-8-sig"))
+        zf.writestr(f"leads_global_{timestamp}.csv", df_to_csv_bytes(global_df).decode("utf-8-sig"))
+
+    st.download_button(
+        label="📦 Tout télécharger en ZIP",
+        data=zip_buffer.getvalue(),
+        file_name=f"leads_meta_{timestamp}.zip",
+        mime="application/zip",
+        key="dl_zip"
+    )
