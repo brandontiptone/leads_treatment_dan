@@ -73,7 +73,7 @@ MAPPING_COLONNES = {
     ]
 }
 
-COLONNES_SORTIE = ["Date de création", "Nom Prénom", "Email", "Téléphone", "Code Postal"]
+COLONNES_SORTIE = ["Date de création", "Propriétaire", "Maison", "Gaz", "Code Postal", "Nom Prénom", "Téléphone", "Client"]
 
 # ─────────────────────────────────────────────
 # FONCTIONS METIER
@@ -108,7 +108,7 @@ def construire_mapping(colonnes):
     return mapping
 
 
-def normaliser_lead(row, mapping):
+def normaliser_lead(row, mapping, proprietaire="Propriétaire", maison="Maison", gaz="Gaz"):
     def get(champ):
         col = mapping.get(champ)
         if col and col in row.index:
@@ -121,7 +121,16 @@ def normaliser_lead(row, mapping):
                     v = v[2:].strip()
                 return v
         return ""
-    return {champ: get(champ) for champ in COLONNES_SORTIE}
+    return {
+        "Date de création": get("Date de création"),
+        "Propriétaire":     proprietaire,
+        "Maison":           maison,
+        "Gaz":              gaz,
+        "Code Postal":      get("Code Postal"),
+        "Nom Prénom":       get("Nom Prénom"),
+        "Téléphone":        get("Téléphone"),
+        "Client":           ""  # sera rempli après classification
+    }
 
 
 def valider_config(config_json_str):
@@ -218,7 +227,7 @@ def df_to_csv_bytes(df):
     return df.to_csv(index=False, encoding="utf-8-sig", sep=";").encode("utf-8-sig")
 
 
-def traiter_fichiers(fichiers_bytes, clients):
+def traiter_fichiers(fichiers_bytes, clients, proprietaire="Propriétaire", maison="Maison", gaz="Gaz"):
     logs = []
     tous_leads_bruts = []
 
@@ -242,7 +251,7 @@ def traiter_fichiers(fichiers_bytes, clients):
             if champs_manquants:
                 log(f"  Colonnes non détectées : {champs_manquants}", "WARNING")
             for _, row in df.iterrows():
-                tous_leads_bruts.append(normaliser_lead(row, mapping))
+                tous_leads_bruts.append(normaliser_lead(row, mapping, proprietaire, maison, gaz))
             log(f"  ✓ {len(df)} leads lus")
         except Exception as e:
             log(f"  ✗ Erreur : {e}", "ERROR")
@@ -257,6 +266,11 @@ def traiter_fichiers(fichiers_bytes, clients):
         if data:
             log(f"  → {cle} : {len(data)} leads", "DEBUG")
 
+    # Remplir la colonne Client
+    for cle, data in leads.items():
+        for lead in data:
+            lead["Client"] = cle
+
     # Construction DataFrames
     resultats = {cle: pd.DataFrame(data, columns=COLONNES_SORTIE) for cle, data in leads.items()}
     doublons_df = pd.DataFrame(doublons, columns=COLONNES_SORTIE + ["Raison"]) if doublons else pd.DataFrame()
@@ -264,11 +278,8 @@ def traiter_fichiers(fichiers_bytes, clients):
     # Global
     tous = []
     for cle, data in leads.items():
-        for lead in data:
-            l = dict(lead)
-            l["Client"] = cle
-            tous.append(l)
-    global_df = pd.DataFrame(tous, columns=["Client"] + COLONNES_SORTIE)
+        tous.extend(data)
+    global_df = pd.DataFrame(tous, columns=COLONNES_SORTIE)
 
     return resultats, doublons_df, global_df, logs
 
@@ -389,10 +400,25 @@ if clients:
 st.divider()
 
 # ─────────────────────────────────────────────
+# VALEURS FIXES
+# ─────────────────────────────────────────────
+
+st.header("② Valeurs fixes des leads")
+col_a, col_b, col_c = st.columns(3)
+with col_a:
+    proprietaire = st.text_input("Propriétaire", value="Propriétaire")
+with col_b:
+    maison = st.text_input("Maison", value="Maison")
+with col_c:
+    gaz = st.text_input("Gaz", value="Gaz")
+
+st.divider()
+
+# ─────────────────────────────────────────────
 # ÉTAPE 2 — Upload des fichiers
 # ─────────────────────────────────────────────
 
-st.header("② Charger les fichiers CSV Meta")
+st.header("③ Charger les fichiers CSV Meta")
 
 fichiers_uploades = st.file_uploader(
     "Glisse tes fichiers CSV ici (plusieurs fichiers acceptés)",
@@ -409,7 +435,7 @@ st.divider()
 # ÉTAPE 3 — Lancement
 # ─────────────────────────────────────────────
 
-st.header("③ Lancer le traitement")
+st.header("④ Lancer le traitement")
 
 if st.button("▶  Lancer le traitement", disabled=(not fichiers_uploades or clients is None)):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -420,7 +446,7 @@ if st.button("▶  Lancer le traitement", disabled=(not fichiers_uploades or cli
 
     with st.spinner("Traitement en cours..."):
         progress.progress(10, "Lecture des fichiers...")
-        resultats, doublons_df, global_df, logs = traiter_fichiers(fichiers_bytes, clients)
+        resultats, doublons_df, global_df, logs = traiter_fichiers(fichiers_bytes, clients, proprietaire, maison, gaz)
         progress.progress(90, "Génération des fichiers de sortie...")
 
         st.session_state.resultats  = resultats
@@ -449,7 +475,7 @@ if st.session_state.resultats is not None:
     timestamp   = st.session_state.timestamp
 
     st.divider()
-    st.header("④ Récapitulatif")
+    st.header("⑤ Récapitulatif")
 
     total_leads = sum(len(df) for df in resultats.values())
     nb_doublons = len(doublons_df) if not doublons_df.empty else 0
@@ -468,7 +494,7 @@ if st.session_state.resultats is not None:
     st.table(recap_data)
 
     st.divider()
-    st.header("⑤ Télécharger les fichiers")
+    st.header("⑥ Télécharger les fichiers")
 
     cols = st.columns(2)
     for i, (cle, df) in enumerate(resultats.items()):
