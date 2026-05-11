@@ -318,15 +318,15 @@ config_defaut = json.dumps({
     {"nom": "Client_AV2",       "prefixes": ["57","54","70","88","90","67","68"]},
     {"nom": "Client_RN_GLOBAL", "prefixes": ["24","47","66","11","09","64","65","87","23","19"]},
 
-    {"nom": "Client_ELIE_PV_1", "prefixes": [29,22,35,56,44]},
-    {"nom": "Client_ELIE_PV_2", "prefixes": [85,79,86,17,16,49]},
-    {"nom": "Client_TOM_PV_1", "prefixes": [13,83,06]},
-    {"nom": "Client_TOM_PV_2", "prefixes": [31,32,09,65]},
-    {"nom": "Client_ACVPV", "prefixes": [32,33,40,47,82]},
-    {"nom": "Client_BL", "prefixes": [16,17,33,64,65,40,47,32]},
-    {"nom": "Client_ZC_GLOBAL", "prefixes": [81,12,37,41,36,18, 85,44,26, 07, 38, 70,25,90, 15, 63, 43, 03]},
-    {"nom": "Client_EL", "prefixes": [31, 66, 09, 11, 34, 30, 48]},
-    {"nom": "Client_DS", "prefixes": [83,84,04,26,07]},
+    {"nom": "Client_ELIE_PV_1", "prefixes": ["29","22","35","56","44"]},
+    {"nom": "Client_ELIE_PV_2", "prefixes": ["85","79","86","17","16","49"]},
+    {"nom": "Client_TOM_PV_1", "prefixes": ["13","83","06"]},
+    {"nom": "Client_TOM_PV_2", "prefixes": ["31","32","09","65"]},
+    {"nom": "Client_ACVPV", "prefixes": ["32","33","40","47","82"]},
+    {"nom": "Client_BL", "prefixes": ["16","17","33","64","65","40","47","32"]},
+    {"nom": "Client_ZC_GLOBAL", "prefixes": ["81","12","37","41","36","18","85","44","26","07","38","70","25","90","15","63","43","03"]},
+    {"nom": "Client_EL", "prefixes": ["31","66","09","11","34","30","48"]},
+    {"nom": "Client_DS", "prefixes": ["83","84","04","26","07"]}
       
       
     {"nom": "Client_RN2",       "prefixes": ["66","11","09"]}
