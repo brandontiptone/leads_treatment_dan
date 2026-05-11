@@ -327,7 +327,6 @@ config_defaut = json.dumps({
     {"nom": "Client_ZC_GLOBAL", "prefixes": [81,12,37,41,36,18, 85,44,26, 07, 38, 70,25,90, 15, 63, 43, 03]},
     {"nom": "Client_EL", "prefixes": [31, 66, 09, 11, 34, 30, 48]},
     {"nom": "Client_DS", "prefixes": [83,84,04,26,07]},
-    {"nom": "Client_AV1", "prefixes": [67,68,88]},
       
       
     {"nom": "Client_RN2",       "prefixes": ["66","11","09"]}
